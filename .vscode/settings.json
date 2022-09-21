@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "*.md": "markdown",
+        "*.tcc": "c",
+        "user.h": "c",
+        "atomic": "c",
+        "condition_variable": "c",
+        "typeinfo": "c"
+    }
+}
