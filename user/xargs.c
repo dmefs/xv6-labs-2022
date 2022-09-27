@@ -3,7 +3,7 @@
 #include "user/user.h"
 
 void
-xargs(char *buf, char *argv[])
+xargs(char *argv[])
 {
     int pid;
 
@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
             *p++ = c;
         } else {
             *p = '\0';
-            xargs(buf, argvs);
+            xargs(argvs);
             p = buf;
         }
     }
