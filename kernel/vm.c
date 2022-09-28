@@ -442,11 +442,8 @@ void
 printpte(pte_t pte, int index, int level)
 {
   for (int i = level; i >= 0; i--)
-    if (i != 0)
-      printf(".. ");
-    else
-      printf("..");
-  printf("%d: pte 0x%p pa 0x%p\n", index, pte, PTE2PA(pte));
+      printf(" ..");
+  printf("%d: pte %p pa %p\n", index, pte, PTE2PA(pte));
 }
 
 void
@@ -468,6 +465,6 @@ _vmprint(pagetable_t pagetable, int level)
 void 
 vmprint(pagetable_t pagetable)
 {
-  printf("page table 0x%16x\n", (uint64)pagetable);
+  printf("page table %p\n", (uint64)pagetable);
   _vmprint(pagetable, 0);
 }
