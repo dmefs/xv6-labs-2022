@@ -437,3 +437,37 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+void
+printpte(pte_t pte, int index, int level)
+{
+  for (int i = level; i >= 0; i--)
+    if (i != 0)
+      printf(".. ");
+    else
+      printf("..");
+  printf("%d: pte 0x%p pa 0x%p\n", index, pte, PTE2PA(pte));
+}
+
+void
+_vmprint(pagetable_t pagetable, int level)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V) { 
+      printpte(pte, i, level);
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+      // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        _vmprint((pagetable_t)child, level + 1);
+      }
+    }
+  }
+}
+
+void 
+vmprint(pagetable_t pagetable)
+{
+  printf("page table 0x%16x\n", (uint64)pagetable);
+  _vmprint(pagetable, 0);
+}
