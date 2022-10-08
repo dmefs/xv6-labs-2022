@@ -86,8 +86,8 @@ usertrap(void)
           p->trapframe->epc = p->alarmhandler;
         }
       }
-    } else
-      yield();
+    }
+    yield();
   }
 
   usertrapret();
