@@ -93,6 +93,7 @@ sys_pgaccess(void)
   
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size * PGSIZE - 1);
+  last = last > MAXVA ? MAXVA : last;
   for (unsigned i = 0; i < 32 && a <= last; i++, a += PGSIZE) {
     if((pte = walk(pagetable, a, 0)) == 0)
       continue;
