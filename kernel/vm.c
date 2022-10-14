@@ -308,27 +308,37 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    if ((*pte) & PTE_W) {
+      (*pte) = ((*pte) & ~PTE_W) | PTE_COW;
+    }
     pa = PTE2PA(*pte);
+    refcount_inc(pa);
+
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, i / PGSIZE, 0);
+  freewalk(new);
+  for (uint64 j = 0; j <= i; j +=PGSIZE) {
+    pte = walk(old, i, 0);
+    if ((*pte) & PTE_COW) {
+      (*pte) = (*pte) & ~PTE_COW;
+      (*pte) &= PTE_W;
+    }
+    pa = PTE2PA(*pte);
+    refcount_dec(pa);
+  }
   return -1;
 }
 
@@ -345,6 +355,50 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+int
+get_new_page(pagetable_t pagetable, uint64 va)
+{
+  // Reads kernel memory
+  if (va >= KERNBASE)
+    return -1;
+  va = PGROUNDDOWN(va);
+  pte_t *pte;
+  if((pte = walk(pagetable, va, 0)) == 0) {
+    panic("get_new_page: walk");
+    return -1;
+  }
+  if ((*pte & PTE_V) == 0) {
+    panic("get_new_page: not valid pte");
+    return -1;
+  }
+  uint flags = PTE_FLAGS(*pte);
+  if ((flags & PTE_COW) == 0)
+    return -1;
+
+  // Modify PTE attribute
+  (*pte) = ((*pte) | PTE_W) & ~PTE_COW;
+  flags = PTE_FLAGS(*pte);
+
+  uint64 old = PTE2PA(*pte);
+
+  // No need to get a new page if it is not a shared page.
+  if (refcount_dec(old) == 1) {
+    return 0;
+  }
+
+  char *new;
+  if ((new = (char*)kalloc()) == 0) {
+    // kfree() will take this frame if refcount is 1. So add 1 back.
+    refcount_inc(old);
+    return -1;
+  }
+  *pte = PA2PTE((uint64)memmove(new, (void*)old, PGSIZE)) | flags;
+  //memmove(new, (void*)old, PGSIZE);
+  //uvmunmap(pagetable, va, 1, 0);
+  //mappages(pagetable, va, PGSIZE, (uint64)new, flags);
+  return 0;
+}
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -358,6 +412,11 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte_t *pte = walk(pagetable, va0, 0);
+    if ((*pte & PTE_COW) && get_new_page(pagetable, va0) != 0)
+      return -1;
+    // pa is updated.
+    pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

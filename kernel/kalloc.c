@@ -23,11 +23,33 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct {
+  struct spinlock lock;
+  uint *array;
+  uint size;
+} pg_refcount;
+
+void 
+initrefcount()
+{
+  for (uint i = 0; i < pg_refcount.size; i++)
+    pg_refcount.array[i] = 1;
+}
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  initlock(&pg_refcount.lock, "pg_refcount");
+
+  uint64 range = ((PHYSTOP - (uint64)end) >> 12) * sizeof(*pg_refcount.array);
+  range = PGROUNDUP(range);
+  uint64 size = range / sizeof(*pg_refcount.array);
+  pg_refcount.array = (uint*)(PHYSTOP - range);
+  pg_refcount.size = size;
+
+  initrefcount();
+  freerange(end, (void*)(PHYSTOP-range));
 }
 
 void
@@ -50,6 +72,9 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+
+  if (refcount_dec((uint64)pa) > 1)
+    return;
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -76,7 +101,46 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r) {
     memset((char*)r, 5, PGSIZE); // fill with junk
+    refcount_set((uint64)r, 1);
+  }
   return (void*)r;
+}
+
+void
+refcount_inc(uint64 pa)
+{
+  uint64 index = (pa - (uint64)end) >> 12;
+
+  acquire(&pg_refcount.lock);
+  ++pg_refcount.array[index];
+  release(&pg_refcount.lock);
+}
+
+void
+refcount_set(uint64 pa, uint val)
+{
+  uint64 index = (pa - (uint64)end) >> 12;
+
+  acquire(&pg_refcount.lock);
+  pg_refcount.array[index] = val;
+  release(&pg_refcount.lock);
+}
+
+uint
+refcount_dec(uint64 pa)
+{
+  uint64 index = (pa - (uint64)end) >> 12;
+
+  acquire(&pg_refcount.lock);
+  uint *val = &pg_refcount.array[index];
+  if (*val == 1) {
+    release(&pg_refcount.lock);
+    return 1;
+  }
+  uint ret = *val;
+  --*val;
+  release(&pg_refcount.lock);
+  return ret;
 }
